@@ -176,9 +176,10 @@ export function registerReadLog(server: McpServer): void {
         }
         const { errors, error_count, warnings } = summarizeErrors(fullLog, 200);
         const tail = fullLog.length > 8000 ? fullLog.slice(-8000) : fullLog;
-        const errorBlock = errors.length
-          ? `=== ${error_count} error line(s) ===\n${errors.join("\n")}\n\n`
-          : "=== no '! ' error lines ===\n\n";
+        const errorHeader = error_count > errors.length
+          ? `=== ${error_count} error line(s) (showing first ${errors.length}) ===`
+          : `=== ${error_count} error line(s) ===`;
+        const errorBlock = errors.length ? `${errorHeader}\n${errors.join("\n")}\n\n` : "=== no '! ' error lines ===\n\n";
         const text =
           errorBlock +
           (fullLog.length > 8000 ? `=== output.log (last 8000 of ${fullLog.length} chars) ===\n` : "=== output.log ===\n") +
