@@ -29,7 +29,7 @@ if (specFiles.length === 0) {
 
 const result = spawnSync("node", ["--test", "--import", "tsx", ...specFiles], { stdio: "inherit" });
 if (result.error) {
-  console.error(`Failed to launch test runner: ${result.error.message}`);
+  console.error(`Failed to launch test runner (node --test --import tsx <files>): ${result.error.message}`);
   process.exit(1);
 }
 process.exit(result.status ?? 1);

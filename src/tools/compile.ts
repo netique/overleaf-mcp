@@ -154,7 +154,7 @@ export function registerReadLog(server: McpServer): void {
       description:
         "Returns the full LaTeX log from the most recent `compile` call. " +
         "`compile` already includes the error count + first few errors in its response — use this only when you need more context (full log, line numbers, package warnings, etc.). " +
-        "Includes a summary of `!`-prefixed error lines at the top, then the full log (truncated to the last 8000 chars).",
+        "Includes a summary of `!`-prefixed error lines at the top (sampled, with total count), then the full log (truncated to the last 8000 chars).",
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
@@ -174,7 +174,7 @@ export function registerReadLog(server: McpServer): void {
         if (fullLog == null) {
           return { content: [{ type: "text", text: "No output.log available." }], isError: true };
         }
-        const { errors, error_count, warnings } = summarizeErrors(fullLog, Number.POSITIVE_INFINITY);
+        const { errors, error_count, warnings } = summarizeErrors(fullLog, 200);
         const tail = fullLog.length > 8000 ? fullLog.slice(-8000) : fullLog;
         const errorBlock = errors.length
           ? `=== ${error_count} error line(s) ===\n${errors.join("\n")}\n\n`
@@ -189,6 +189,7 @@ export function registerReadLog(server: McpServer): void {
             log_bytes: fullLog.length,
             error_count,
             error_lines: errors,
+            error_lines_sampled: errors.length,
             warning_count: warnings,
           },
         };
