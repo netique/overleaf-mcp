@@ -111,6 +111,13 @@ export async function captureCookie(baseUrl: string, opts: CaptureOpts = {}): Pr
   const profile = profileDir();
   await fs.mkdir(profile, { recursive: true });
 
+  // Remove any DevToolsActivePort left behind by a previous Chrome — if we
+  // read a stale file, we'd try to connect to a port that nothing is bound
+  // to and surface as ECONNREFUSED to the caller. Deleting before spawn
+  // means the file's reappearance is a positive signal that the just-
+  // spawned Chrome is actually listening.
+  await fs.rm(path.join(profile, "DevToolsActivePort"), { force: true });
+
   const args = chromeFlags(profile, config.insecure);
   logger.info(`launching ${chromePath} (profile=${profile})`);
   const child = spawn(chromePath, args, { stdio: "ignore", detached: false });
