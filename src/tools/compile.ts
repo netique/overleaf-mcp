@@ -183,11 +183,11 @@ export function registerReadLog(server: McpServer): void {
         return {
           content: [{ type: "text", text }],
           structuredContent: {
-              log_bytes: fullLog.length,
-              error_count,
-              error_lines: errors,
-              warning_count: warnings,
-            },
+            log_bytes: fullLog.length,
+            error_count,
+            error_lines: errors,
+            warning_count: warnings,
+          },
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
