@@ -9,6 +9,7 @@ import { registerOpenProject } from "./tools/openProject.js";
 import { registerListFiles } from "./tools/listFiles.js";
 import { registerReadFile } from "./tools/readFile.js";
 import { registerEditFile } from "./tools/editFile.js";
+import { registerFindAndReplace } from "./tools/findAndReplace.js";
 import { registerCompile, registerReadLog } from "./tools/compile.js";
 import { registerComments } from "./tools/comments.js";
 import { registerTrackedChanges } from "./tools/trackedChanges.js";
@@ -70,6 +71,7 @@ async function main(): Promise<void> {
   registerListFiles(server);
   registerReadFile(server);
   registerEditFile(server);
+  registerFindAndReplace(server);
   registerCompile(server);
   registerReadLog(server);
   registerComments(server);

@@ -6,7 +6,7 @@ Context for Claude (or any future contributor) working in this repo. Read top to
 
 `overleaf-mcp` is an MCP server for Overleaf. It speaks Overleaf's Socket.IO web API (the same channel the official editor uses), **not** the Git bridge. The headline feature: edits land as **tracked changes** in Overleaf's Review panel — every other Overleaf MCP punts to the Git bridge and silently overwrites, which makes them unusable for collaborative academic work.
 
-Tools (16): `ping`, `list_projects`, `open_project`, `list_files`, `read_file`, `edit_file`, `compile`, `read_log`, `list_comments`, `read_comment_thread`, `reply_comment`, `resolve_comment`, `reopen_comment`, `list_tracked_changes`, `accept_changes`, `reject_changes`.
+Tools (17): `ping`, `list_projects`, `open_project`, `list_files`, `read_file`, `edit_file`, `find_and_replace`, `compile`, `read_log`, `list_comments`, `read_comment_thread`, `reply_comment`, `resolve_comment`, `reopen_comment`, `list_tracked_changes`, `accept_changes`, `reject_changes`.
 
 ## Architecture you should know about before changing things
 
@@ -18,7 +18,7 @@ Tools (16): `ping`, `list_projects`, `open_project`, `list_files`, `read_file`, 
 
 - **Accept is HTTP**: `POST /project/{id}/doc/{docId}/changes/accept` with `{change_ids}`. Batched per doc in `src/tools/trackedChanges.ts`.
 
-- **`edit_file` defaults to `track: "on"`**. For a research workflow the agent should never silently overwrite — every edit goes through the review panel by default. Pass `track: "off"` to opt out.
+- **`edit_file` defaults to `track: "on"`**. For a research workflow the agent should never silently overwrite — every edit goes through the review panel by default. Pass `track: "off"` to opt out. `find_and_replace` shares the same default and the same OT pathway.
 
 - **Stale-cache safety**: `read_file` pins `docCache` to the exact `(text, version)` it returned. `edit_file` diffs against that baseline, so a stale read causes a clean OT transform (or rejection) instead of silent overwrite. There's a manual test for this in `tests/manual/stale-version.mjs`.
 
