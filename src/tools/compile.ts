@@ -21,7 +21,10 @@ const Schema = z.object({
     .describe("Stop on the first LaTeX error instead of continuing to produce a partial PDF."),
 });
 
-function summarizeErrors(log: string | undefined): { errors: string[]; error_count: number; warnings: number } {
+function summarizeErrors(
+  log: string | undefined,
+  maxErrorLines = 20,
+): { errors: string[]; error_count: number; warnings: number } {
   if (!log) return { errors: [], error_count: 0, warnings: 0 };
   const errors: string[] = [];
   let warnings = 0;
@@ -29,7 +32,7 @@ function summarizeErrors(log: string | undefined): { errors: string[]; error_cou
     if (/^! /.test(line)) errors.push(line.trim());
     else if (/warning/i.test(line)) warnings++;
   }
-  return { errors: errors.slice(0, 20), error_count: errors.length, warnings };
+  return { errors: errors.slice(0, maxErrorLines), error_count: errors.length, warnings };
 }
 
 // Build the GET-able URL for an output file from a compile response, including
@@ -171,7 +174,7 @@ export function registerReadLog(server: McpServer): void {
         if (fullLog == null) {
           return { content: [{ type: "text", text: "No output.log available." }], isError: true };
         }
-        const { errors, error_count, warnings } = summarizeErrors(fullLog);
+        const { errors, error_count, warnings } = summarizeErrors(fullLog, Number.POSITIVE_INFINITY);
         const tail = fullLog.length > 8000 ? fullLog.slice(-8000) : fullLog;
         const errorBlock = errors.length
           ? `=== ${error_count} error line(s) ===\n${errors.join("\n")}\n\n`
