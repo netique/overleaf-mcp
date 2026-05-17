@@ -15,7 +15,7 @@ import { maybeRunCli } from "./auth/cli.js";
 import { logger } from "./util/logger.js";
 
 const SERVER_NAME = "overleaf-mcp";
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = "0.2.0";
 
 const INSTRUCTIONS = [
   "Overleaf MCP server. Operates on .tex files via Overleaf's Socket.IO web API",

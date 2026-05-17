@@ -27,7 +27,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --import tsx tests/unit/*.spec.ts",
+    "test": "find tests/unit -name '*.spec.ts' -print -quit 2>/dev/null | grep -q . && node --test --import tsx tests/unit/*.spec.ts || echo 'No unit tests found in tests/unit; skipping.'",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

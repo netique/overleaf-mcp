@@ -2,6 +2,7 @@ import { ensureSocketForProject, disconnectActive } from "../api/socket.js";
 import { flattenTree, isTrackChangesOnForUser, type FlatEntity, type ProjectEntity } from "../api/projectTypes.js";
 import type { CompileResponse } from "../api/compileTypes.js";
 import { getIdentity } from "./identity.js";
+import { clearDocCache } from "./docCache.js";
 
 export interface ActiveProject {
   projectId: string;
@@ -29,6 +30,7 @@ export async function open(projectId: string): Promise<ActiveProject> {
   if (!joinedProject) {
     throw new Error("joinProject did not return a project entity");
   }
+  clearDocCache();
   // rootFolder is an array containing the single top-level folder.
   const root = joinedProject.rootFolder?.[0];
   const entities = root ? flattenTree(root) : [];
@@ -50,6 +52,7 @@ export async function open(projectId: string): Promise<ActiveProject> {
 
 export function close(): void {
   disconnectActive();
+  clearDocCache();
   active = null;
 }
 
