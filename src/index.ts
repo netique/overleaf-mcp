@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
@@ -15,7 +17,12 @@ import { maybeRunCli } from "./auth/cli.js";
 import { logger } from "./util/logger.js";
 
 const SERVER_NAME = "overleaf-mcp";
-const SERVER_VERSION = "0.2.0";
+// Read once from the published package.json so a release bump can never
+// desync from what the MCP handshake reports. Works in both `tsx` (src/)
+// and the built layout (dist/) because the file is one level above each.
+const SERVER_VERSION = (
+  JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }
+).version;
 
 const INSTRUCTIONS = [
   "Overleaf MCP server. Operates on .tex files via Overleaf's Socket.IO web API",

@@ -397,6 +397,11 @@ async function withReconnectingSocket<T>(
       try { active.disconnect(); } catch { /* ignore */ }
       active = null;
     }
+    // The fresh socket won't have any docs joined, so any cached doc text +
+    // version is referring to the old session — clear it so the next caller
+    // (or the prep step below) re-fetches from the server.
+    const { clearDocCache } = await import("../session/docCache.js");
+    clearDocCache();
     if (isAuth) {
       const { evictAndRediscover } = await import("../auth/discover.js");
       const { loadConfig } = await import("../config.js");

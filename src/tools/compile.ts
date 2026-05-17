@@ -21,7 +21,7 @@ const Schema = z.object({
     .describe("Stop on the first LaTeX error instead of continuing to produce a partial PDF."),
 });
 
-function summarizeErrors(
+export function summarizeErrors(
   log: string | undefined,
   maxErrorLines = 20,
 ): { errors: string[]; error_count: number; warnings: number } {
