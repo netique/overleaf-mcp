@@ -154,7 +154,8 @@ export function registerReadLog(server: McpServer): void {
       description:
         "Returns the full LaTeX log from the most recent `compile` call. " +
         "`compile` already includes the error count + first few errors in its response — use this only when you need more context (full log, line numbers, package warnings, etc.). " +
-        "Includes a summary of `!`-prefixed error lines at the top (sampled, with total count), then the full log (truncated to the last 8000 chars).",
+        "The `content` array shows a summary of `!`-prefixed error lines at the top, then the log truncated to the last 8000 chars for display. " +
+        "`structuredContent.log` contains the FULL untruncated log so programmatic callers can grep / parse it.",
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
@@ -187,6 +188,7 @@ export function registerReadLog(server: McpServer): void {
         return {
           content: [{ type: "text", text }],
           structuredContent: {
+            log: fullLog,
             log_bytes: fullLog.length,
             error_count,
             error_lines: errors,
