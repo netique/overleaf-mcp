@@ -50,8 +50,8 @@ export function registerReadFile(server: McpServer): void {
       title: "Read a file from the open Overleaf project",
       description:
         "Reads the contents of a file by project-relative path. " +
-        "For text docs (.tex, .bib, .md, etc.) returns the full text and the current OT version. " +
-        "For binary files (images, PDFs) returns base64 + MIME type via HTTP download.",
+        "For text docs (.tex, .bib, .md, etc.) the full text appears in both the `content` array and `structuredContent.text`; metadata (version, line/byte counts, ranges, tracked-change/comment counts) is in `structuredContent`. " +
+        "For binary files (images, PDFs) base64 is in `content` and `structuredContent.base64`, with MIME type alongside.",
       inputSchema: Schema.shape,
       annotations: { readOnlyHint: true },
     },
@@ -93,6 +93,7 @@ export function registerReadFile(server: McpServer): void {
               path: entity.path,
               doc_id: entity.id,
               kind: "doc",
+              text,
               version: doc.version,
               line_count: doc.docLines.length,
               byte_count: Buffer.byteLength(text, "utf8"),
@@ -112,20 +113,23 @@ export function registerReadFile(server: McpServer): void {
         const ext = entity.name.split(".").pop()?.toLowerCase() ?? "";
         const looksText = !BINARY_EXTS.has(ext) && buf.length > 0 && buf.subarray(0, Math.min(2048, buf.length)).every((b) => b === 9 || b === 10 || b === 13 || (b >= 32 && b < 127) || b >= 128);
         if (looksText) {
+          const text = buf.toString("utf8");
           return {
-            content: [{ type: "text", text: buf.toString("utf8") }],
-            structuredContent: { path: entity.path, file_id: entity.id, kind: "file", byte_count: buf.length, encoding: "utf8" },
+            content: [{ type: "text", text }],
+            structuredContent: { path: entity.path, file_id: entity.id, kind: "file", text, byte_count: buf.length, encoding: "utf8" },
           };
         }
+        const base64 = buf.toString("base64");
         return {
           content: [
             { type: "text", text: `(binary file, ${buf.length} bytes, base64 below)` },
-            { type: "text", text: buf.toString("base64") },
+            { type: "text", text: base64 },
           ],
           structuredContent: {
             path: entity.path,
             file_id: entity.id,
             kind: "file",
+            base64,
             byte_count: buf.length,
             mime_type: mimeForName(entity.name),
             encoding: "base64",
