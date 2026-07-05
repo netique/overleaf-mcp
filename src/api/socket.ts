@@ -29,7 +29,11 @@ export interface OtUpdate {
   v: number;
   lastV?: number;
   hash?: string;
-  meta?: { source: string; ts: number; user_id: string; tc?: string };
+  // Overleaf's real-time service stamps `source`, `user_id`, and `ts` on the
+  // update server-side from the socket/session; only `tc` (the tracked-change
+  // id seed) is client-authoritative. Stricter Overleaf versions reject a
+  // client-supplied `source`/`ts`/`user_id` with "Unrecognized keys".
+  meta?: { tc?: string };
 }
 
 interface JoinDocResult {

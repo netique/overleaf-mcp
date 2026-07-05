@@ -5,8 +5,7 @@
 // freshness checks, OT submit, post-edit verify, cache sync, response notes —
 // is identical and lives here.
 
-import { applyOtUpdate, getActiveSocket, type OtUpdate } from "../api/socket.js";
-import { getIdentity } from "../session/identity.js";
+import { applyOtUpdate, type OtUpdate } from "../api/socket.js";
 import { ensureDocLoaded, updateDoc, type CachedDoc } from "../session/docCache.js";
 import { findByPath, getActiveProject, type ActiveProject } from "../session/activeProject.js";
 import type { FlatEntity } from "../api/projectTypes.js";
@@ -121,14 +120,12 @@ export interface SubmitResult {
 // Tool-specific work (per-tool structuredContent shape, per-tool prose) is
 // the caller's responsibility.
 export async function submitAndVerify(opts: SubmitOpts): Promise<SubmitResult> {
-  const identity = await getIdentity();
-  const sock = getActiveSocket();
   const { shouldTrack, serverWillTrack, trackOverridden } = resolveTracking(opts.track, opts.ap.trackChangesOnForMe);
-  const meta: NonNullable<OtUpdate["meta"]> = {
-    source: sock?.publicId ?? "overleaf-mcp",
-    ts: Date.now(),
-    user_id: identity.userId,
-  };
+  // Send only `meta.tc` (the tracked-change id seed). Overleaf stamps
+  // `source`/`user_id`/`ts` itself from the socket/session — supplying them
+  // from the client is redundant and stricter Overleaf versions reject the
+  // whole update with "Unrecognized keys: source,ts,user_id".
+  const meta: NonNullable<OtUpdate["meta"]> = {};
   if (shouldTrack) meta.tc = generateIdSeed();
   const update: OtUpdate = { doc: opts.entity.id, op: opts.ops, v: opts.cached.version, meta };
   await applyOtUpdate(opts.entity.id, update);

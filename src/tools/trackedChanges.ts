@@ -5,8 +5,7 @@ import { asJson, olGet, olPostJson, expectOk } from "../api/http.js";
 import { docPathById, getActiveProject } from "../session/activeProject.js";
 import type { RangesResponse, DocRange } from "../api/commentTypes.js";
 import type { MemberEntity } from "../api/projectTypes.js";
-import { applyOtUpdate, getActiveSocket, joinDoc, type OtUpdate } from "../api/socket.js";
-import { getIdentity } from "../session/identity.js";
+import { applyOtUpdate, joinDoc, type OtUpdate } from "../api/socket.js";
 import { generateIdSeed } from "../ot/trackedChanges.js";
 import { logger } from "../util/logger.js";
 
@@ -106,22 +105,17 @@ async function rejectViaOt(docId: string, changes: FlatChange[]): Promise<void> 
       ? { p: c.position, d: c.text, u: true }  // undo a tracked insert -> delete the text
       : { p: c.position, i: c.text, u: true }  // undo a tracked delete -> re-mark as present
   );
-  const identity = await getIdentity();
-  const sock = getActiveSocket();
   // We don't keep a cache for arbitrary docs (only ones the agent has edited),
   // so fetch the current version straight from the server before sending the
   // inverse op.
   const fresh = await joinDoc(docId);
+  // Only `meta.tc` is client-authoritative; Overleaf stamps source/user_id/ts
+  // itself and stricter versions reject them with "Unrecognized keys".
   const update: OtUpdate = {
     doc: docId,
     op: ops,
     v: fresh.version,
-    meta: {
-      source: sock?.publicId ?? "overleaf-mcp",
-      ts: Date.now(),
-      user_id: identity.userId,
-      tc: generateIdSeed(),
-    },
+    meta: { tc: generateIdSeed() },
   };
   await applyOtUpdate(docId, update);
 }
