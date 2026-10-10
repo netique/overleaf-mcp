@@ -38,8 +38,8 @@ Working end-to-end against `overleaf.com` — 16 tools, tracked-changes edits an
 | `list_comments` | Lists review-panel comment threads with doc path, quoted text, author, latest-message preview. Supports `include_resolved`, `path_contains`, `full`. |
 | `read_comment_thread` | Returns the full message history of one thread. |
 | `reply_comment` | Posts a new message to an existing thread. |
-| `resolve_comment` | Marks a thread resolved. |
-| `reopen_comment` | Reopens a resolved thread. |
+| `resolve_comment` | Marks a thread resolved. Optional `doc_id` (from `list_comments`) skips the doc lookup. |
+| `reopen_comment` | Reopens a resolved thread. Optional `doc_id` (from `list_comments`) skips the doc lookup. |
 
 ## Typical workflow
 
