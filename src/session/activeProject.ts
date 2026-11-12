@@ -149,3 +149,53 @@ function watchTrackChanges(projectId: string, userId: string): void {
     if (active?.projectId === projectId) applyTrackChangesState(active, args[0], userId);
   });
 }
+
+// ---- file-tree bookkeeping ----
+// Structural changes (new/renamed/moved/deleted entities) are applied to the
+// cached flat tree directly, so later path lookups work without re-opening the
+// project (which would also clear the doc cache and its stale-read baselines).
+
+export function rootFolderId(ap: ActiveProject): string | undefined {
+  return ap.project.rootFolder?.[0]?._id;
+}
+
+export function folderIdForPath(ap: ActiveProject, folderPath: string): string | undefined {
+  const p = folderPath.replace(/^\/+|\/+$/g, "");
+  if (p === "") return rootFolderId(ap);
+  return ap.entities.find((e) => e.kind === "folder" && e.path === p)?.id;
+}
+
+export function addEntity(ap: ActiveProject, kind: FlatEntity["kind"], id: string, name: string, parentFolderId: string): FlatEntity {
+  const parent = ap.entities.find((e) => e.kind === "folder" && e.id === parentFolderId);
+  const path = parent ? `${parent.path}/${name}` : name;
+  const entity: FlatEntity = { kind, id, path, name, parentFolderId };
+  ap.entities = ap.entities.filter((e) => e.id !== id).concat(entity);
+  return entity;
+}
+
+/** Rename and/or move an entity; a folder's descendants get their paths rewritten. */
+export function relocateEntity(ap: ActiveProject, id: string, changes: { name?: string; parentFolderId?: string }): void {
+  const entity = ap.entities.find((e) => e.id === id);
+  if (!entity) return;
+  const oldPath = entity.path;
+  const name = changes.name ?? entity.name;
+  const parentFolderId = changes.parentFolderId ?? entity.parentFolderId;
+  const parent = ap.entities.find((e) => e.kind === "folder" && e.id === parentFolderId);
+  const newPath = parent ? `${parent.path}/${name}` : name;
+  entity.name = name;
+  entity.parentFolderId = parentFolderId;
+  entity.path = newPath;
+  if (entity.kind === "folder") {
+    for (const e of ap.entities) {
+      if (e.path.startsWith(`${oldPath}/`)) e.path = newPath + e.path.slice(oldPath.length);
+    }
+  }
+  if (ap.rootDocId === id) ap.rootDocPath = newPath;
+}
+
+export function removeEntity(ap: ActiveProject, id: string): void {
+  const entity = ap.entities.find((e) => e.id === id);
+  if (!entity) return;
+  const prefix = `${entity.path}/`;
+  ap.entities = ap.entities.filter((e) => e.id !== id && !(entity.kind === "folder" && e.path.startsWith(prefix)));
+}

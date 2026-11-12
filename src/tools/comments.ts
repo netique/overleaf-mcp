@@ -20,8 +20,9 @@ interface EnrichedThread {
   quoted_text?: string;
   position?: number;
   resolved: boolean;
-  // No comment range in any doc points at this thread: its anchor text was
-  // deleted, or the doc was. Overleaf's Review panel doesn't show these.
+  // No comment range in any doc points at this thread, typically because the
+  // doc it was on has been deleted. Overleaf's Review panel doesn't show these.
+  // (Deleting only the commented text keeps a zero-length range, not an orphan.)
   orphaned: boolean;
   message_count: number;
   first_author?: string;
@@ -87,8 +88,8 @@ const ListSchema = z.object({
     .boolean()
     .default(false)
     .describe(
-      "Include orphaned threads, whose anchor text no longer exists in any doc (default: false). " +
-        "Overleaf's Review panel hides these, so they are usually leftovers from deleted or rewritten text.",
+      "Include orphaned threads, which no doc references any more, typically because their doc was deleted (default: false). " +
+        "Overleaf's Review panel hides these.",
     ),
 });
 
@@ -108,16 +109,24 @@ const ThreadStateSchema = ThreadIdSchema.extend({
 // Resolve/reopen are doc-scoped routes in Overleaf's web app
 // (`/project/:id/doc/:doc_id/thread/:thread_id/{resolve,reopen}`, see
 // review-panel/context/threads-context.tsx); the project-only form 404s.
-async function threadDocId(projectId: string, threadId: string): Promise<string> {
-  const ranges = await asJson<RangesResponse>(await olGet(`project/${projectId}/ranges`), "GET /ranges");
+// An orphaned thread (its doc was deleted) is in no doc's ranges. The thread
+// routes still need a doc id, and any doc of the project works for them (the
+// doc-updater has no comment to touch), so fall back to the root doc.
+async function threadDocId(ap: ActiveProject, threadId: string): Promise<string> {
+  const ranges = await asJson<RangesResponse>(await olGet(`project/${ap.projectId}/ranges`), "GET /ranges");
   for (const docRange of ranges) {
     if (docRange.ranges?.comments?.some((c) => c.op.t === threadId)) return docRange.id;
   }
-  throw new Error(`Thread '${threadId}' is not anchored in any doc of this project. Check the id with list_comments.`);
+  const threads = await asJson<ThreadsByIdResponse>(await olGet(`project/${ap.projectId}/threads`), "GET /threads");
+  if (!threads[threadId]) throw new Error(`Thread '${threadId}' not found in this project. Check the id with list_comments.`);
+  const fallback = ap.rootDocId ?? ap.entities.find((e) => e.kind === "doc")?.id;
+  if (!fallback) throw new Error(`Thread '${threadId}' is orphaned and the project has no doc to address it through.`);
+  return fallback;
 }
 
-async function setThreadState(projectId: string, args: { thread_id: string; doc_id?: string }, action: "resolve" | "reopen"): Promise<string> {
-  const docId = args.doc_id ?? (await threadDocId(projectId, args.thread_id));
+async function setThreadState(ap: ActiveProject, args: { thread_id: string; doc_id?: string }, action: "resolve" | "reopen"): Promise<string> {
+  const projectId = ap.projectId;
+  const docId = args.doc_id ?? (await threadDocId(ap, args.thread_id));
   const res = await olPostJson(`project/${projectId}/doc/${docId}/thread/${args.thread_id}/${action}`, {});
   await expectOk(res, `POST /doc/${docId}/thread/${args.thread_id}/${action}`);
   return docId;
@@ -335,13 +344,13 @@ export function registerComments(server: McpServer): void {
     {
       title: "Resolve a comment thread",
       description:
-        "Marks a thread as resolved. Use after addressing the comment (e.g. by editing the doc and replying). " +
+        "Marks a thread as resolved. Use after addressing the comment (e.g. by editing the doc and replying). Also works for orphaned threads. " +
         "Pass `doc_id` from list_comments to skip a lookup round-trip.",
       inputSchema: ThreadStateSchema.shape,
     },
     projectTool("write", async (args, ap) => {
       try {
-        const docId = await setThreadState(ap.projectId, args, "resolve");
+        const docId = await setThreadState(ap, args, "resolve");
         return {
           content: [{ type: "text", text: `Resolved thread ${args.thread_id}.` }],
           structuredContent: { thread_id: args.thread_id, doc_id: docId, resolved: true },
@@ -362,7 +371,7 @@ export function registerComments(server: McpServer): void {
     },
     projectTool("write", async (args, ap) => {
       try {
-        const docId = await setThreadState(ap.projectId, args, "reopen");
+        const docId = await setThreadState(ap, args, "reopen");
         return {
           content: [{ type: "text", text: `Reopened thread ${args.thread_id}.` }],
           structuredContent: { thread_id: args.thread_id, doc_id: docId, resolved: false },
@@ -399,13 +408,13 @@ export function registerComments(server: McpServer): void {
       title: "Delete a comment thread",
       description:
         "Permanently deletes a comment thread and all its messages (Overleaf's 'Delete' in the thread menu). Cannot be undone; " +
-        "prefer resolve_comment unless the thread should disappear entirely. Orphaned threads (see list_comments) are not anchored in any doc, so they need an explicit `doc_id`.",
+        "prefer resolve_comment unless the thread should disappear entirely. Also works for orphaned threads (see list_comments).",
       inputSchema: ThreadStateSchema.shape,
       annotations: { destructiveHint: true },
     },
     projectTool("write", async (args, ap) => {
       try {
-        const docId = args.doc_id ?? (await threadDocId(ap.projectId, args.thread_id));
+        const docId = args.doc_id ?? (await threadDocId(ap, args.thread_id));
         const res = await olDelete(`project/${ap.projectId}/doc/${docId}/thread/${args.thread_id}`);
         await expectOk(res, `DELETE /doc/${docId}/thread/${args.thread_id}`);
         return {

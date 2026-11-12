@@ -10,11 +10,13 @@ import { registerListFiles } from "./tools/listFiles.js";
 import { registerReadFile } from "./tools/readFile.js";
 import { registerEditFile } from "./tools/editFile.js";
 import { registerFindAndReplace } from "./tools/findAndReplace.js";
-import { registerCompile, registerReadLog } from "./tools/compile.js";
+import { registerCompile, registerLabelPages, registerReadLog } from "./tools/compile.js";
 import { registerComments } from "./tools/comments.js";
 import { registerTrackedChanges } from "./tools/trackedChanges.js";
 import { registerTrackChangesState } from "./tools/trackChangesState.js";
 import { registerSearchProject } from "./tools/searchProject.js";
+import { registerProjectFiles } from "./tools/projectFiles.js";
+import { registerHistory } from "./tools/history.js";
 import { close as closeActiveProject } from "./session/activeProject.js";
 import { maybeRunCli } from "./auth/cli.js";
 import { logger } from "./util/logger.js";
@@ -48,6 +50,10 @@ const INSTRUCTIONS = [
   "new comment thread on existing text without editing it; reply_comment,",
   "resolve_comment and delete_comment manage threads. search_project finds text",
   "across all docs.",
+  "",
+  "Files: create_project, create_doc, create_folder, upload_file, rename_entity,",
+  "move_entity, delete_entity. History: list_history, then diff_file between two",
+  "versions. After compile, label_pages gives the PDF page of every \\label.",
   "",
   "Auth UX (important for the user-facing message):",
   "If no session cookie is stored yet, or the previous one has expired (Overleaf",
@@ -88,10 +94,13 @@ async function main(): Promise<void> {
   registerFindAndReplace(server);
   registerCompile(server);
   registerReadLog(server);
+  registerLabelPages(server);
   registerComments(server);
   registerTrackedChanges(server);
   registerTrackChangesState(server);
   registerSearchProject(server);
+  registerProjectFiles(server);
+  registerHistory(server);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
