@@ -25,7 +25,9 @@ import { logger } from "../util/logger.js";
 
 export interface OtUpdate {
   doc: string;
-  op?: Array<{ p: number; i?: string; d?: string; u?: boolean }>;
+  // `i`/`d` are text inserts/deletes; `c` + `t` anchor a review-panel comment
+  // thread `t` on the existing text `c` at position `p` (no text change).
+  op?: Array<{ p: number; i?: string; d?: string; u?: boolean; c?: string; t?: string }>;
   v: number;
   lastV?: number;
   hash?: string;

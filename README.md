@@ -17,7 +17,7 @@ The [`overleaf-workshop`](https://github.com/overleaf-workshop/overleaf-workshop
 
 ## Status
 
-Working end-to-end against `overleaf.com` — 16 tools, tracked-changes edits and review-panel comments both verified. Published on npm as [`@netique/overleaf-mcp`](https://www.npmjs.com/package/@netique/overleaf-mcp).
+Working end-to-end against `overleaf.com` — 23 tools, tracked-changes edits and review-panel comments both verified. Published on npm as [`@netique/overleaf-mcp`](https://www.npmjs.com/package/@netique/overleaf-mcp).
 
 ## Tools
 
@@ -34,14 +34,20 @@ Every project-scoped tool also takes an optional `project_id` — see [Project s
 | `find_and_replace` | Surgical edit: replace one occurrence (or all, with `replace_all: true`) of `old_string` with `new_string` without re-emitting the rest of the doc. Cheaper in tokens than `edit_file` for targeted changes and avoids whitespace drift from re-emitting surrounding text. By default `old_string` must be unique; ambiguous matches return a list of line:col locations so you can extend the match. Same `track` defaults and OT path as `edit_file`, so it lands as a pending suggestion in the Review panel. |
 | `list_tracked_changes` | Enumerates every pending tracked-change suggestion across the open project, with author name + email, doc path, op kind (insert/delete), position, op text, change_id. Filter by `author_email`, `author_id_endswith`, `path_contains`, `kind`, `text_contains`, `limit`. |
 | `accept_changes` | Accepts one or more tracked changes by `change_id` (from `list_tracked_changes`). Multi-doc groups are batched automatically. Irreversible. |
+| `set_track_changes` | Turns the Review panel's 'Track changes' switch on or off (`on`), for yourself (`scope: "me"`, default) or for every member (`scope: "everyone"`), optionally also for guests. Keeps other users' settings intact and updates `track_changes_on_for_me`. |
 | `reject_changes` | Rejects one or more tracked changes by `change_id`. Implemented as `applyOtUpdate` with the inverse op + `u:true` (same pathway Overleaf's web client uses). Irreversible. |
 | `compile` | Triggers an Overleaf compile and returns a unified summary: `status`, `built_cleanly` (true iff PDF + zero LaTeX errors), `error_count`, `warning_count`, `first_errors` (sample), `output_files`, timings. Already fetches and parses `output.log` inline — no extra `read_log` call needed for the happy path. Pass `root_doc`, `draft`, `stop_on_first_error` to control. |
 | `read_log` | Returns the full `output.log` from the most recent compile, with `!`-prefixed error lines surfaced at the top. Use when `compile`'s inline summary isn't enough context. |
-| `list_comments` | Lists review-panel comment threads with doc path, quoted text, author, latest-message preview. Supports `include_resolved`, `path_contains`, `full`. |
+| `list_comments` | Lists review-panel comment threads with doc path, quoted text, author, latest-message preview. Supports `include_resolved`, `path_contains`, `full`. Orphaned threads (anchor text deleted, hidden by Overleaf's Review panel) are left out and counted in `hidden_orphaned` unless `include_orphaned: true`. |
 | `read_comment_thread` | Returns the full message history of one thread. |
+| `add_comment` | Starts a new comment thread anchored to `quoted_text` in a doc, like selecting text and clicking 'Add comment'. The text is not changed. `occurrence` picks one match when the text occurs more than once. |
 | `reply_comment` | Posts a new message to an existing thread. |
 | `resolve_comment` | Marks a thread resolved. Optional `doc_id` (from `list_comments`) skips the doc lookup. |
 | `reopen_comment` | Reopens a resolved thread. Optional `doc_id` (from `list_comments`) skips the doc lookup. |
+| `delete_comment` | Permanently deletes a thread and all its messages. |
+| `edit_comment_message` | Edits one of your own messages in a thread. |
+| `delete_comment_message` | Deletes one message from a thread (own messages; `any_author: true` for the project owner). |
+| `search_project` | Searches every doc in the project (plain text or regex, optional case sensitivity, path filter, skip comment lines) and returns `path:line:col` matches. |
 
 ## Typical workflow
 
@@ -53,6 +59,8 @@ Things to ask Claude once `overleaf-mcp` is connected:
 - _"Read intro.tex and fix the missing comma in the second paragraph."_  → with track-changes on, this lands as a tracked suggestion.
 - _"Compile the project and tell me what the LaTeX errors mean."_  → uses `compile` then `read_log` automatically.
 - _"For each open comment thread, suggest a fix and reply with what you did."_  → end-to-end review workflow.
+- _"Turn on track changes, then proofread sec/intro.tex: fix typos directly and leave a comment wherever a sentence is unclear."_  → `set_track_changes`, `find_and_replace`, `add_comment`.
+- _"Where do we cite smith2020 or mention 'domain shift'?"_  → `search_project`.
 
 ### Project selection across MCP sessions
 

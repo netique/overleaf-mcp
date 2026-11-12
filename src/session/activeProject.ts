@@ -1,4 +1,4 @@
-import { ensureSocketForProject, disconnectActive } from "../api/socket.js";
+import { ensureSocketForProject, disconnectActive, getActiveSocket } from "../api/socket.js";
 import { flattenTree, isTrackChangesOnForUser, type FlatEntity, type ProjectEntity } from "../api/projectTypes.js";
 import type { CompileResponse } from "../api/compileTypes.js";
 import { getIdentity } from "./identity.js";
@@ -95,6 +95,7 @@ export async function open(projectId: string): Promise<ActiveProject> {
   const trackChangesOnForMe = isTrackChangesOnForUser(joinedProject, identity.userId);
   const rootDocId = joinedProject.rootDoc_id;
   const rootDocPath = rootDocId ? entities.find((e) => e.kind === "doc" && e.id === rootDocId)?.path : undefined;
+  watchTrackChanges(projectId, identity.userId);
   active = {
     projectId,
     name: joinedProject.name ?? "(unnamed)",
@@ -123,4 +124,28 @@ export function docPathById(ap: ActiveProject): Map<string, string> {
   const m = new Map<string, string>();
   for (const e of ap.entities) if (e.kind === "doc") m.set(e.id, e.path);
   return m;
+}
+
+/**
+ * Replace the project's track-changes state (the `{ [userId | "__guests__"]: boolean }`
+ * map the web client keeps in `project.trackChangesState`) and recompute
+ * `trackChangesOnForMe`, which decides whether the server forces tracking.
+ */
+export function applyTrackChangesState(ap: ActiveProject, state: unknown, userId: string): void {
+  delete ap.project.track_changes_state;
+  ap.project.trackChangesState = state;
+  ap.trackChangesOnForMe = isTrackChangesOnForUser(ap.project, userId);
+}
+
+// Collaborators can toggle track changes in the browser at any time; the
+// real-time service broadcasts the new map as `toggle-track-changes`. Keep our
+// copy in sync so edit tools report `tracked` / `track_overridden` truthfully.
+const watchedSockets = new WeakSet<object>();
+function watchTrackChanges(projectId: string, userId: string): void {
+  const socket = getActiveSocket();
+  if (!socket || watchedSockets.has(socket)) return;
+  watchedSockets.add(socket);
+  socket.on("toggle-track-changes", (args) => {
+    if (active?.projectId === projectId) applyTrackChangesState(active, args[0], userId);
+  });
 }
