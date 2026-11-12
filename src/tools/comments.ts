@@ -399,7 +399,7 @@ export function registerComments(server: McpServer): void {
       title: "Delete a comment thread",
       description:
         "Permanently deletes a comment thread and all its messages (Overleaf's 'Delete' in the thread menu). Cannot be undone; " +
-        "prefer resolve_comment unless the thread should disappear entirely. Works for orphaned threads too if you pass any `doc_id` of the project.",
+        "prefer resolve_comment unless the thread should disappear entirely. Orphaned threads (see list_comments) are not anchored in any doc, so they need an explicit `doc_id`.",
       inputSchema: ThreadStateSchema.shape,
       annotations: { destructiveHint: true },
     },
