@@ -1,8 +1,8 @@
-import { ensureSocketForProject, disconnectActive, getActiveSocket } from "../api/socket.js";
+import { ensureSocketForProject, disconnectActive, getActiveSocket, setRejoinHook } from "../api/socket.js";
 import { flattenTree, isTrackChangesOnForUser, type FlatEntity, type ProjectEntity } from "../api/projectTypes.js";
 import type { CompileResponse } from "../api/compileTypes.js";
 import { getIdentity } from "./identity.js";
-import { clearDocCache } from "./docCache.js";
+import { clearDocCache, dropDoc } from "./docCache.js";
 
 export interface ActiveProject {
   projectId: string;
@@ -33,7 +33,7 @@ export type ProjectResolution =
 
 interface ProjectSession {
   getActiveProject(): ActiveProject | null;
-  open(projectId: string): Promise<ActiveProject>;
+  open(projectId: string, opts?: { fresh?: boolean }): Promise<ActiveProject>;
 }
 
 /**
@@ -50,9 +50,13 @@ export class ProjectSelector {
 
   constructor(private readonly session: ProjectSession) {}
 
-  /** open_project: switch and confirm as the write target. */
+  /**
+   * open_project: switch and confirm as the write target. Always rejoins, so
+   * an explicit open_project returns the server's current file tree even if a
+   * structural change was missed while the socket was connected.
+   */
   async select(projectId: string): Promise<ActiveProject> {
-    const ap = await this.session.open(projectId);
+    const ap = await this.session.open(projectId, { fresh: true });
     this.writeTarget = ap.projectId;
     return ap;
   }
@@ -82,7 +86,10 @@ export class ProjectSelector {
 
 export const projectSelector = new ProjectSelector({ getActiveProject, open });
 
-export async function open(projectId: string): Promise<ActiveProject> {
+export async function open(projectId: string, opts: { fresh?: boolean } = {}): Promise<ActiveProject> {
+  // ensureSocketForProject reuses an open socket together with the project
+  // snapshot from its original join; a fresh open must drop it and rejoin.
+  if (opts.fresh) disconnectActive();
   const { joinedProject } = await ensureSocketForProject(projectId);
   if (!joinedProject) {
     throw new Error("joinProject did not return a project entity");
@@ -95,7 +102,7 @@ export async function open(projectId: string): Promise<ActiveProject> {
   const trackChangesOnForMe = isTrackChangesOnForUser(joinedProject, identity.userId);
   const rootDocId = joinedProject.rootDoc_id;
   const rootDocPath = rootDocId ? entities.find((e) => e.kind === "doc" && e.id === rootDocId)?.path : undefined;
-  watchTrackChanges(projectId, identity.userId);
+  watchProjectEvents(projectId, identity.userId);
   active = {
     projectId,
     name: joinedProject.name ?? "(unnamed)",
@@ -107,6 +114,20 @@ export async function open(projectId: string): Promise<ActiveProject> {
   };
   return active;
 }
+
+setRejoinHook((projectId, joinedProject) => {
+  if (!active || active.projectId !== projectId || !joinedProject) return;
+  const root = joinedProject.rootFolder?.[0];
+  active.project = joinedProject;
+  active.entities = root ? flattenTree(root) : [];
+  active.rootDocId = joinedProject.rootDoc_id;
+  active.rootDocPath = active.entities.find((e) => e.kind === "doc" && e.id === active?.rootDocId)?.path;
+  void getIdentity().then((identity) => {
+    if (!active || active.projectId !== projectId) return;
+    active.trackChangesOnForMe = isTrackChangesOnForUser(joinedProject, identity.userId);
+    watchProjectEvents(projectId, identity.userId);
+  });
+});
 
 export function close(): void {
   disconnectActive();
@@ -137,17 +158,55 @@ export function applyTrackChangesState(ap: ActiveProject, state: unknown, userId
   ap.trackChangesOnForMe = isTrackChangesOnForUser(ap.project, userId);
 }
 
-// Collaborators can toggle track changes in the browser at any time; the
-// real-time service broadcasts the new map as `toggle-track-changes`. Keep our
-// copy in sync so edit tools report `tracked` / `track_overridden` truthfully.
+// Collaborators change the project in the browser at any time. The real-time
+// service broadcasts track-changes toggles and every structural change to the
+// file tree; apply them to our copy so path lookups never resolve to a doc that
+// was renamed, moved or deleted (and replaced) since we joined.
 const watchedSockets = new WeakSet<object>();
-function watchTrackChanges(projectId: string, userId: string): void {
+interface TreeNode { _id: string; name: string; docs?: TreeNode[]; fileRefs?: TreeNode[]; folders?: TreeNode[] }
+function watchProjectEvents(projectId: string, userId: string): void {
   const socket = getActiveSocket();
   if (!socket || watchedSockets.has(socket)) return;
   watchedSockets.add(socket);
+  const current = () => (active?.projectId === projectId ? active : null);
   socket.on("toggle-track-changes", (args) => {
-    if (active?.projectId === projectId) applyTrackChangesState(active, args[0], userId);
+    const ap = current();
+    if (ap) applyTrackChangesState(ap, args[0], userId);
   });
+  socket.on("reciveNewDoc", (args) => {
+    const ap = current();
+    const doc = args[1] as TreeNode | undefined;
+    if (ap && doc?._id) addEntity(ap, "doc", doc._id, doc.name, String(args[0]));
+  });
+  socket.on("reciveNewFile", (args) => {
+    const ap = current();
+    const file = args[1] as TreeNode | undefined;
+    if (ap && file?._id) addEntity(ap, "file", file._id, file.name, String(args[0]));
+  });
+  socket.on("reciveNewFolder", (args) => {
+    const ap = current();
+    const folder = args[1] as TreeNode | undefined;
+    if (ap && folder?._id) addFolderTree(ap, folder, String(args[0]));
+  });
+  socket.on("reciveEntityRename", (args) => {
+    const ap = current();
+    if (ap && typeof args[0] === "string" && typeof args[1] === "string") relocateEntity(ap, args[0], { name: args[1] });
+  });
+  socket.on("reciveEntityMove", (args) => {
+    const ap = current();
+    if (ap && typeof args[0] === "string" && typeof args[1] === "string") relocateEntity(ap, args[0], { parentFolderId: args[1] });
+  });
+  socket.on("removeEntity", (args) => {
+    const ap = current();
+    if (ap && typeof args[0] === "string") removeEntity(ap, args[0]);
+  });
+}
+
+function addFolderTree(ap: ActiveProject, folder: TreeNode, parentFolderId: string): void {
+  addEntity(ap, "folder", folder._id, folder.name, parentFolderId);
+  for (const d of folder.docs ?? []) addEntity(ap, "doc", d._id, d.name, folder._id);
+  for (const f of folder.fileRefs ?? []) addEntity(ap, "file", f._id, f.name, folder._id);
+  for (const sub of folder.folders ?? []) addFolderTree(ap, sub, folder._id);
 }
 
 // ---- file-tree bookkeeping ----
@@ -197,5 +256,8 @@ export function removeEntity(ap: ActiveProject, id: string): void {
   const entity = ap.entities.find((e) => e.id === id);
   if (!entity) return;
   const prefix = `${entity.path}/`;
+  for (const e of ap.entities) {
+    if (e.kind === "doc" && (e.id === id || (entity.kind === "folder" && e.path.startsWith(prefix)))) dropDoc(e.id);
+  }
   ap.entities = ap.entities.filter((e) => e.id !== id && !(entity.kind === "folder" && e.path.startsWith(prefix)));
 }
