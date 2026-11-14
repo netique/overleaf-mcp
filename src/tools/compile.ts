@@ -73,11 +73,15 @@ export function registerCompile(server: McpServer): void {
     },
     projectTool("read", async (args, ap) => {
       try {
+        // overleaf.com now validates rootResourcePath as a string and rejects
+        // null with a 400, so default to the project's root doc and leave the
+        // field out entirely when even that is unknown.
+        const rootResourcePath = args.root_doc ?? ap.rootDocPath;
         const body = {
           check: "silent",
           draft: args.draft,
           incrementalCompilesEnabled: true,
-          rootResourcePath: args.root_doc ?? null,
+          ...(rootResourcePath !== undefined && { rootResourcePath }),
           stopOnFirstError: args.stop_on_first_error,
         };
         const res = await olPostJson(`project/${ap.projectId}/compile?auto_compile=true`, body);
