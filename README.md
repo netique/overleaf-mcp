@@ -189,6 +189,22 @@ Any Chromium-family browser works — Chrome, Brave, Edge, Arc, Chromium. If `fi
 
 **Compile succeeds but `read_log` returns 404** — Overleaf needs `?clsiserverid=...` to route to the right CLSI worker; we add this automatically from the previous compile response. If you see this, the previous compile may not have completed; re-run `compile` and then `read_log`.
 
+## Releasing
+
+Releases are published to npm automatically by GitHub Actions
+(`.github/workflows/publish.yml`), using npm trusted publishing, so no npm token
+or `npm login` is involved:
+
+1. Bump the version: `npm version patch --no-git-tag-version` (or `minor` / `major`).
+2. Commit `package.json` and `package-lock.json`, then merge to `main`.
+3. The workflow runs the type check and tests, publishes the new version to npm
+   with provenance, and creates the `vX.Y.Z` tag and GitHub release.
+
+It skips versions that are already on npm, and can also be started manually
+from the Actions tab. One-time setup: on npmjs.com, the package's
+Settings → Trusted Publisher must list GitHub Actions, repository
+`netique/overleaf-mcp`, workflow `publish.yml`.
+
 ## Acknowledgements
 
 - [`overleaf-workshop`](https://github.com/overleaf-workshop/overleaf-workshop) by @iamhyc and contributors — protocol reference for the HTTP + Socket.IO flow, comment thread endpoints. The `94-review-panel` branch was the source for the comment data shapes.
