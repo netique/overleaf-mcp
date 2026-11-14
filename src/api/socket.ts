@@ -25,7 +25,9 @@ import { logger } from "../util/logger.js";
 
 export interface OtUpdate {
   doc: string;
-  op?: Array<{ p: number; i?: string; d?: string; u?: boolean }>;
+  // `i`/`d` are text inserts/deletes; `c` + `t` anchor a review-panel comment
+  // thread `t` on the existing text `c` at position `p` (no text change).
+  op?: Array<{ p: number; i?: string; d?: string; u?: boolean; c?: string; t?: string }>;
   v: number;
   lastV?: number;
   hash?: string;
@@ -412,7 +414,8 @@ async function withReconnectingSocket<T>(
       clearIdentity();
       await evictAndRediscover(loadConfig().baseUrl);
     }
-    await ensureSocketForProject(projectId);
+    const rejoined = await ensureSocketForProject(projectId);
+    rejoinHook?.(projectId, rejoined.joinedProject);
     if (prep) await prep();
     return await op();
   }
@@ -453,6 +456,15 @@ export async function applyOtUpdate(docId: string, update: OtUpdate): Promise<vo
     // propagate to the caller — same as if the original emit had failed.
     async () => { await joinDoc(docId); },
   );
+}
+
+// Called after withReconnectingSocket silently rejoins a project, so the
+// session layer can refresh its file tree from the new join (structural
+// changes made while we were disconnected were never broadcast to us) and
+// re-attach its event listeners to the new socket.
+let rejoinHook: ((projectId: string, joinedProject: ProjectEntity | undefined) => void) | null = null;
+export function setRejoinHook(hook: typeof rejoinHook): void {
+  rejoinHook = hook;
 }
 
 export function disconnectActive(): void {

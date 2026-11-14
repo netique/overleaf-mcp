@@ -31,10 +31,18 @@ export async function olGet(path: string, extraHeaders: Record<string, string> =
   });
 }
 
+export interface PostOptions {
+  // Newer Overleaf routes validate the body with z.strictObject and reject the
+  // legacy `_csrf` body field; the header alone is enough for them (it is all
+  // the web client sends). Default true keeps the existing routes unchanged.
+  csrfInBody?: boolean;
+}
+
 export async function olPostJson(
   path: string,
   body: Record<string, unknown> = {},
   extraHeaders: Record<string, string> = {},
+  options: PostOptions = {},
 ): Promise<Response> {
   return withAuthRetry(async () => {
     const id = await getIdentity();
@@ -48,7 +56,22 @@ export async function olPostJson(
         "X-Csrf-Token": id.csrf,
         ...extraHeaders,
       },
-      body: JSON.stringify({ _csrf: id.csrf, ...body }),
+      body: JSON.stringify(options.csrfInBody === false ? body : { _csrf: id.csrf, ...body }),
+    });
+    throwIfAuthBad(res);
+    return res;
+  });
+}
+
+// multipart/form-data POST (file uploads). fetch sets the boundary header.
+export async function olPostForm(path: string, form: FormData): Promise<Response> {
+  return withAuthRetry(async () => {
+    const id = await getIdentity();
+    const res = await fetch(joinUrl(id.baseUrl, path), {
+      method: "POST",
+      redirect: "manual",
+      headers: { Cookie: id.cookie, Connection: "keep-alive", "X-Csrf-Token": id.csrf },
+      body: form,
     });
     throwIfAuthBad(res);
     return res;
