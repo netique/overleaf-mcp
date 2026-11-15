@@ -21,6 +21,10 @@ export function updateDoc(docId: string, newText: string, newVersion: number): v
   docs.set(docId, { docId, text: newText, version: newVersion });
 }
 
+export function dropDoc(docId: string): void {
+  docs.delete(docId);
+}
+
 export function clearDocCache(): void {
   docs.clear();
 }

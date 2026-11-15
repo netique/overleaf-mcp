@@ -10,7 +10,7 @@ import { generateIdSeed } from "../ot/trackedChanges.js";
 import { logger } from "../util/logger.js";
 import { projectIdArg, projectTool } from "./project.js";
 
-interface FlatChange {
+export interface FlatChange {
   change_id: string;
   doc_id: string;
   doc_path?: string;
@@ -70,6 +70,35 @@ function flattenChanges(
   return out;
 }
 
+// ---------- shared filters ----------
+
+export interface ChangeFilter {
+  author_email?: string;
+  author_id_endswith?: string;
+  path_contains?: string;
+  kind?: "any" | "insert" | "delete";
+  text_contains?: string;
+}
+
+export function filterChanges(all: FlatChange[], f: ChangeFilter): FlatChange[] {
+  let out = all;
+  if (f.author_email) out = out.filter((c) => c.author_email === f.author_email);
+  if (f.author_id_endswith) out = out.filter((c) => (c.user_id ?? "").endsWith(f.author_id_endswith as string));
+  if (f.path_contains) {
+    const needle = f.path_contains.toLowerCase();
+    out = out.filter((c) => (c.doc_path ?? "").toLowerCase().includes(needle));
+  }
+  if (f.kind && f.kind !== "any") out = out.filter((c) => c.kind === f.kind);
+  if (f.text_contains) {
+    const needle = f.text_contains.toLowerCase();
+    out = out.filter((c) => c.text.toLowerCase().includes(needle));
+  }
+  return out;
+}
+
+const hasFilter = (f: ChangeFilter) =>
+  Boolean(f.author_email || f.author_id_endswith || f.path_contains || (f.kind && f.kind !== "any") || f.text_contains);
+
 // ---------- list_tracked_changes ----------
 
 const ListSchema = z.object({
@@ -87,8 +116,34 @@ const ListSchema = z.object({
 
 const AcceptSchema = z.object({
   project_id: projectIdArg,
-  change_ids: z.array(z.string().min(8)).min(1).describe("Tracked-change ids to accept (from list_tracked_changes)."),
+  change_ids: z
+    .array(z.string().min(8))
+    .min(1)
+    .optional()
+    .describe("Tracked-change ids (from list_tracked_changes). Alternatively, select changes with the filters below."),
+  author_email: z.string().optional().describe("Select all changes by this exact author email."),
+  author_id_endswith: z.string().optional().describe("Select all changes by a user_id ending in this suffix."),
+  path_contains: z.string().optional().describe("Select all changes in docs whose path contains this substring."),
+  kind: z.enum(["any", "insert", "delete"]).default("any").describe("Restrict filter selection to inserts or deletes."),
+  text_contains: z.string().optional().describe("Select changes whose inserted/deleted text contains this (case-insensitive)."),
+  all: z.boolean().default(false).describe("Select every pending change in the project. Required to act without ids or filters."),
 });
+
+type SelectArgs = z.infer<typeof AcceptSchema>;
+
+// Turn ids or filters into the concrete set of changes to act on. Filters
+// combine with AND; ids and filters can't be mixed, so a typo in a filter can
+// never widen an explicit id list.
+export function selectChanges(all: FlatChange[], args: SelectArgs): { ok: true; changes: FlatChange[]; missing: string[] } | { ok: false; error: string } {
+  const filtered = hasFilter(args);
+  if (args.change_ids && (filtered || args.all)) return { ok: false, error: "Pass either change_ids or filters/all, not both." };
+  if (args.change_ids) {
+    const wanted = new Set(args.change_ids);
+    return { ok: true, changes: all.filter((c) => wanted.has(c.change_id)), missing: args.change_ids.filter((id) => !all.some((c) => c.change_id === id)) };
+  }
+  if (!filtered && !args.all) return { ok: false, error: "Nothing selected: pass change_ids, at least one filter, or all: true." };
+  return { ok: true, changes: filterChanges(all, args), missing: [] };
+}
 
 async function postAccept(projectId: string, docId: string, changeIds: string[]): Promise<void> {
   const res = await olPostJson(`project/${projectId}/doc/${docId}/changes/accept`, { change_ids: changeIds });
@@ -140,24 +195,7 @@ export function registerTrackedChanges(server: McpServer): void {
         const ranges = await fetchAllRanges(ap.projectId);
         const pathMap = docPathById(ap);
         const members = memberMap(ap);
-        let all = flattenChanges(ranges, pathMap, members);
-        if (args.author_email) {
-          const wanted = args.author_email;
-          all = all.filter((c) => c.author_email === wanted);
-        }
-        if (args.author_id_endswith) {
-          const suffix = args.author_id_endswith;
-          all = all.filter((c) => (c.user_id ?? "").endsWith(suffix));
-        }
-        if (args.path_contains) {
-          const needle = args.path_contains.toLowerCase();
-          all = all.filter((c) => (c.doc_path ?? "").toLowerCase().includes(needle));
-        }
-        if (args.kind !== "any") all = all.filter((c) => c.kind === args.kind);
-        if (args.text_contains) {
-          const needle = args.text_contains.toLowerCase();
-          all = all.filter((c) => c.text.toLowerCase().includes(needle));
-        }
+        const all = filterChanges(flattenChanges(ranges, pathMap, members), args);
         all.sort((a, b) => (b.timestamp ? Date.parse(b.timestamp) : 0) - (a.timestamp ? Date.parse(a.timestamp) : 0));
         const truncated = all.length > args.limit;
         const shown = all.slice(0, args.limit).map((c) => ({
@@ -181,36 +219,28 @@ export function registerTrackedChanges(server: McpServer): void {
   server.registerTool(
     "accept_changes",
     {
-      title: "Accept tracked changes by id",
+      title: "Accept tracked changes",
       description:
-        "Permanently accepts the specified tracked-change suggestions. The text stays in the doc; the pending-change metadata is cleared. Pass the `change_id` values from `list_tracked_changes`. Changes that span multiple docs are grouped automatically. Irreversible.",
+        "Permanently accepts tracked-change suggestions. The text stays in the doc; the pending-change metadata is cleared. Select changes either by `change_ids` from `list_tracked_changes`, or by filters (author, path, kind, text; combined with AND), or with `all: true`. Changes that span multiple docs are grouped automatically. Irreversible.",
       inputSchema: AcceptSchema.shape,
     },
     projectTool("write", async (args, ap) => {
       try {
-        // Resolve which doc each change belongs to (via ranges).
         const ranges = await fetchAllRanges(ap.projectId);
-        const docByChange = new Map<string, string>();
-        for (const docRange of ranges) {
-          for (const c of docRange.ranges?.changes ?? []) docByChange.set(c.id, docRange.id);
+        const pathMap = docPathById(ap);
+        const sel = selectChanges(flattenChanges(ranges, pathMap, memberMap(ap)), args);
+        if (!sel.ok) return { content: [{ type: "text", text: sel.error }], isError: true };
+        const unknown = sel.missing;
+        if (sel.changes.length === 0) {
+          return {
+            content: [{ type: "text", text: args.change_ids ? `None of the provided change_ids exist as pending changes. Maybe already accepted/rejected. unknown: ${unknown.join(", ")}` : "No pending changes match the filters." }],
+            isError: true,
+          };
         }
         const grouped = new Map<string, string[]>();
-        const unknown: string[] = [];
-        for (const cid of args.change_ids) {
-          const did = docByChange.get(cid);
-          if (!did) unknown.push(cid);
-          else {
-            const arr = grouped.get(did) ?? [];
-            arr.push(cid);
-            grouped.set(did, arr);
-          }
-        }
-        if (unknown.length === args.change_ids.length) {
-          return { content: [{ type: "text", text: `None of the provided change_ids exist as pending changes. Maybe already accepted/rejected. unknown: ${unknown.join(", ")}` }], isError: true };
-        }
+        for (const c of sel.changes) grouped.set(c.doc_id, [...(grouped.get(c.doc_id) ?? []), c.change_id]);
         let accepted = 0;
         const docResults: Array<{ doc_id: string; doc_path?: string; count: number }> = [];
-        const pathMap = docPathById(ap);
         for (const [docId, ids] of grouped) {
           await postAccept(ap.projectId, docId, ids);
           accepted += ids.length;
@@ -232,9 +262,9 @@ export function registerTrackedChanges(server: McpServer): void {
   server.registerTool(
     "reject_changes",
     {
-      title: "Reject tracked changes by id",
+      title: "Reject tracked changes",
       description:
-        "Rejects the specified tracked-change suggestions. For tracked inserts the inserted text is removed; for tracked deletes the strikethrough is cleared and the text stays. Implemented as an OT update with `u:true` flags on the inverse ops — same pathway Overleaf's web client uses. Pass the `change_id` values from `list_tracked_changes`. Irreversible.",
+        "Rejects the specified tracked-change suggestions. For tracked inserts the inserted text is removed; for tracked deletes the strikethrough is cleared and the text stays. Implemented as an OT update with `u:true` flags on the inverse ops — same pathway Overleaf's web client uses. Select changes by `change_ids` from `list_tracked_changes`, by filters (author, path, kind, text; combined with AND), or with `all: true`. Irreversible.",
       inputSchema: RejectSchema.shape,
     },
     projectTool("write", async (args, ap) => {
@@ -243,12 +273,15 @@ export function registerTrackedChanges(server: McpServer): void {
         const ranges = await fetchAllRanges(ap.projectId);
         const pathMap = docPathById(ap);
         const members = memberMap(ap);
-        const flat = flattenChanges(ranges, pathMap, members);
-        const wanted = new Set(args.change_ids);
-        const matches = flat.filter((c) => wanted.has(c.change_id));
-        const missing = args.change_ids.filter((id) => !flat.some((c) => c.change_id === id));
+        const sel = selectChanges(flattenChanges(ranges, pathMap, members), args);
+        if (!sel.ok) return { content: [{ type: "text", text: sel.error }], isError: true };
+        const matches = sel.changes;
+        const missing = sel.missing;
         if (matches.length === 0) {
-          return { content: [{ type: "text", text: `No matching pending changes for the supplied ids. They may already be accepted/rejected. missing: ${missing.join(", ")}` }], isError: true };
+          return {
+            content: [{ type: "text", text: args.change_ids ? `No matching pending changes for the supplied ids. They may already be accepted/rejected. missing: ${missing.join(", ")}` : "No pending changes match the filters." }],
+            isError: true,
+          };
         }
         // Group by doc and reject per doc.
         const byDoc = new Map<string, FlatChange[]>();

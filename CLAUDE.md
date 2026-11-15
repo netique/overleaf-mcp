@@ -6,7 +6,7 @@ Context for Claude (or any future contributor) working in this repo. Read top to
 
 `overleaf-mcp` is an MCP server for Overleaf. It speaks Overleaf's Socket.IO web API (the same channel the official editor uses), **not** the Git bridge. The headline feature: edits land as **tracked changes** in Overleaf's Review panel — every other Overleaf MCP punts to the Git bridge and silently overwrites, which makes them unusable for collaborative academic work.
 
-Tools (17): `ping`, `list_projects`, `open_project`, `list_files`, `read_file`, `edit_file`, `find_and_replace`, `compile`, `read_log`, `list_comments`, `read_comment_thread`, `reply_comment`, `resolve_comment`, `reopen_comment`, `list_tracked_changes`, `accept_changes`, `reject_changes`.
+Tools (33): `ping`, `create_project`, `list_projects`, `open_project`, `list_files`, `create_doc`, `create_folder`, `upload_file`, `rename_entity`, `move_entity`, `delete_entity`, `list_history`, `diff_file`, `label_pages`, `read_file`, `edit_file`, `find_and_replace`, `search_project`, `compile`, `read_log`, `list_comments`, `read_comment_thread`, `add_comment`, `reply_comment`, `edit_comment_message`, `delete_comment_message`, `resolve_comment`, `reopen_comment`, `delete_comment`, `list_tracked_changes`, `accept_changes`, `reject_changes`, `set_track_changes`.
 
 ## Architecture you should know about before changing things
 
@@ -19,6 +19,14 @@ Tools (17): `ping`, `list_projects`, `open_project`, `list_files`, `read_file`, 
 - **Tracked deletes physically remove text from `docLines`.** Per the ranges-tracker source comment: *"deletes correspond to text which is no longer there"*. The deleted text is preserved in `ranges.changes[].op.d` (which is how the Review panel renders the strikethrough), but the visible doc body shrinks. So `new_content` written to docCache after a tracked edit IS a faithful snapshot of the post-edit server state — no special cache handling is needed, and `read_file` does not need a "deleted text still here" notice. A common misreading is to assume tracked deletes leave the original text in place; they don't.
 
 - **Reject is client-side OT**: there's no `/changes/reject` user-facing HTTP endpoint. To reject, we build the inverse op (`d:` for an insert, `i:` for a delete) with `u: true` and send it via `applyOtUpdate`. Server's RangesTracker recognises `u:true` and clears the matching tracked-change entry. Captured live by intercepting Overleaf's web client.
+
+- **Comments are created in two steps** (mirrors `addComment` in the web client's `review-panel/context/threads-context.tsx`): `POST /project/{id}/thread/{threadId}/messages` with a fresh 24-hex thread id (`generateIdSeed() + "000001"`, same as `RangesTracker.generateId`), then an `applyOtUpdate` whose op is `{ c: quotedText, p, t: threadId }`. The comment op changes no text but bumps the doc version. If the op fails, `add_comment` deletes the thread again so it doesn't linger as an orphan. A thread becomes orphaned when the doc it is anchored in is deleted (deleting only the commented text keeps a zero-length comment range): `/threads` still returns it, no doc's `/ranges` references it, and the Review panel hides it. `list_comments` does the same by default. The doc-scoped thread routes (resolve, reopen, delete) still work for orphans when addressed through any doc of the project; `threadDocId` falls back to the root doc.
+
+- **Track-changes toggle is HTTP + socket**: `POST /project/{id}/track_changes` with `{ on_for: { [userId]: bool }, on_for_guests? }` replaces the whole per-user map (see `track-changes-state-context.tsx`), so `set_track_changes` always sends the existing map with only the caller's own entry changed (and `on_for_guests` passed through). It deliberately cannot change other users' or guests' tracking: that would let an agent bypass co-authors' review. The server broadcasts the new map as the `toggle-track-changes` socket event; `activeProject` listens and keeps `trackChangesOnForMe` current, including when a collaborator flips the switch in the browser.
+
+- **File-tree and project routes are strict**: `POST /project/new`, `/project/{id}/doc`, `/folder`, `/{type}/{id}/rename` and `/move` validate the body with `z.strictObject` and reject the legacy `_csrf` body field, so these call `olPostJson(..., { csrfInBody: false })` (the `X-Csrf-Token` header is enough, and is all the web client sends). Uploads are multipart to `/Project/{id}/upload?folder_id=` with the file in `qqfile`. After any structural change the tools patch `ap.entities` in place (`addEntity` / `relocateEntity` / `removeEntity`) rather than re-opening the project, which would clear the doc cache.
+
+- **Compile needs a string `rootResourcePath`**: overleaf.com rejects `null` with a 400, so `compile` sends the root doc path (or omits the field). `page_count` comes from the log's "Output written on ... (N pages" line; `label_pages` parses `\newlabel` entries from `output.aux` of the last compile.
 
 - **Accept is HTTP**: `POST /project/{id}/doc/{docId}/changes/accept` with `{change_ids}`. Batched per doc in `src/tools/trackedChanges.ts`.
 
@@ -40,6 +48,8 @@ Tools (17): `ping`, `list_projects`, `open_project`, `list_files`, `read_file`, 
 
 Cookie capture is via a dedicated headless-ish Chrome profile, driven over the Chrome DevTools Protocol — `node dist/index.js login` opens a window pointing at `<OL_BASE_URL>/project`, user logs in normally (captcha / Google OAuth / ORCID / institutional SSO / 2FA all work because it's a real Chrome), cookie is read via `Network.getCookies` once the dashboard loads, persisted to `<configDir>/overleaf-mcp/cookie.json` (mode 0600). The same flow auto-triggers when a tool call hits a 302→/login or 401/403. Dedicated profile means we never touch the user's real Chrome and never trigger a macOS Keychain prompt for it. `OL_BASE_URL` defaults to `https://www.overleaf.com`; `OL_BROWSER` overrides the Chrome binary path; `OL_INSECURE=1` adds `--ignore-certificate-errors` for self-hosted CE with self-signed certs; `OL_CSRF` is optional (auto-discovered from `/project` HTML's `ol-csrfToken` meta).
 
+**`upload_file` local paths are sandboxed** (`src/util/uploadPaths.ts`), like the official filesystem MCP server: `local_path` must realpath (symlinks included) into one of the client's MCP roots (`roots/list`) or `OL_UPLOAD_DIRS`; any dot-segment (`.ssh`, `.env`) is refused; with no allowed dirs, `local_path` is refused and `content_base64` is the fallback. Otherwise a prompt injection in a doc could push e.g. `~/.ssh/id_rsa` into a shared project.
+
 ## Tests
 
 `tests/manual/*.mjs` are end-to-end smoke + edge-case scripts. They spawn the built `dist/index.js` as a child process and drive it over stdio. None require CI infra; all need a cookie file (run `node dist/index.js login` first). Highlights:
@@ -51,6 +61,9 @@ Cookie capture is via a dedicated headless-ish Chrome profile, driven over the C
 - `multiop-edit.mjs <project> [doc]` — confirms diff-match-patch produces multi-op updates
 - `compile-fix.mjs <project> [doc]` — compile → error log → fix → recompile loop
 - `accept-reject.mjs <project>` — list_tracked_changes → accept 1 → reject 1
+- `files-history.mjs <project>` — create/upload (incl. dotfile and outside-dir refusals, via a temp `OL_UPLOAD_DIRS`)/rename/move/delete, filtered reject/accept, orphaned-thread resolve + delete, compile page_count + label_pages, list_history + diff_file. Works in a `mcp-test/` folder and deletes it afterwards; use a scratch project.
+- `tree-sync.mjs <project>` — two clients: B creates, renames-and-replaces, moves and deletes docs; A must follow via the socket broadcasts and after re-opening. Cleans up after itself.
+- `review-tools.mjs <project> [doc]` — set_track_changes round trip (checked from a second client), add_comment → reply → edit/delete message → delete_comment, search_project. Restores the project afterwards.
 - `v1_1-followups.mjs <project>` — verifies root-doc-default + inline error_count
 
 ## Things not to do without asking

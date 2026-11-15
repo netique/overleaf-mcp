@@ -49,13 +49,57 @@ function buildOutputUrl(file: OutputFile, last: CompileResponse): string {
   return qs ? `${base}${sep}${qs}` : base;
 }
 
-async function fetchOutputLog(last: CompileResponse): Promise<string | undefined> {
-  const logFile = last.outputFiles?.find((f) => f.path === "output.log");
-  if (!logFile) return undefined;
-  const path = buildOutputUrl(logFile, last);
+async function fetchOutputFile(last: CompileResponse, name: string): Promise<string | undefined> {
+  const file = last.outputFiles?.find((f) => f.path === name);
+  if (!file) return undefined;
+  const path = buildOutputUrl(file, last);
   const res = await olGet(path);
   await expectOk(res, `GET ${path}`);
   return await res.text();
+}
+
+const fetchOutputLog = (last: CompileResponse) => fetchOutputFile(last, "output.log");
+
+// "Output written on output.pdf (12 pages, 345678 bytes)." (the line may wrap at 79 chars)
+export function pageCountFromLog(log: string): number | undefined {
+  const m = log.replace(/\n/g, "").match(/Output written on [^(]*\((\d+) pages?/);
+  return m ? Number(m[1]) : undefined;
+}
+
+// Read one `{...}` group starting at s[i] === "{", honouring nested braces.
+function braceGroup(s: string, i: number): { content: string; end: number } | undefined {
+  if (s[i] !== "{") return undefined;
+  let depth = 0;
+  for (let j = i; j < s.length; j++) {
+    if (s[j] === "{") depth++;
+    else if (s[j] === "}" && --depth === 0) return { content: s.slice(i + 1, j), end: j + 1 };
+  }
+  return undefined;
+}
+
+export interface AuxLabel { label: string; number: string; page: string; title?: string }
+
+/** Parse `\newlabel{key}{{number}{page}{title}{anchor}{}}` entries (plain LaTeX has only number and page). */
+export function parseAuxLabels(aux: string): AuxLabel[] {
+  const out: AuxLabel[] = [];
+  const re = /\\newlabel\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(aux)) !== null) {
+    const key = braceGroup(aux, m.index + m[0].length - 1);
+    if (!key) continue;
+    const body = braceGroup(aux, key.end);
+    if (!body) continue;
+    const fields: string[] = [];
+    let k = 0;
+    while (k < body.content.length && fields.length < 3) {
+      const g = braceGroup(body.content, k);
+      if (!g) break;
+      fields.push(g.content);
+      k = g.end;
+    }
+    if (fields.length >= 2) out.push({ label: key.content, number: fields[0], page: fields[1], title: fields[2] || undefined });
+  }
+  return out;
 }
 
 export function registerCompile(server: McpServer): void {
@@ -93,11 +137,13 @@ export function registerCompile(server: McpServer): void {
         let warningCount = 0;
         let errorLines: string[] = [];
         let logBytes = 0;
+        let pageCount: number | undefined;
         if (logFile) {
           try {
             const log = await fetchOutputLog(result);
             if (log) {
               logBytes = log.length;
+              pageCount = pageCountFromLog(log);
               const summarized = summarizeErrors(log);
               errorLines = summarized.errors;
               errorCount = summarized.error_count;
@@ -111,6 +157,7 @@ export function registerCompile(server: McpServer): void {
           status: result.status ?? "unknown",
           built_cleanly: errorCount === 0 && Boolean(pdf),
           pdf_available: Boolean(pdf),
+          page_count: pageCount,
           error_count: errorCount,
           warning_count: warningCount,
           first_errors: errorLines.slice(0, 5),
@@ -120,7 +167,7 @@ export function registerCompile(server: McpServer): void {
           output_files: (result.outputFiles ?? []).map((f) => f.path),
         };
         const headline = summary.built_cleanly
-          ? `Built cleanly. PDF produced, 0 LaTeX errors.`
+          ? `Built cleanly. PDF produced${pageCount ? ` (${pageCount} pages)` : ""}, 0 LaTeX errors.`
           : errorCount > 0
             ? `LaTeX errors detected (${errorCount}). ${pdf ? "Partial PDF produced." : "No PDF."} First error: ${errorLines[0] ?? "(see read_log)"}`
             : !pdf
@@ -200,6 +247,43 @@ export function registerReadLog(server: McpServer): void {
         const msg = err instanceof Error ? err.message : String(err);
         logger.error("read_log failed", msg);
         return { content: [{ type: "text", text: `Failed to fetch output.log: ${msg}` }], isError: true };
+      }
+    }),
+  );
+}
+
+export function registerLabelPages(server: McpServer): void {
+  server.registerTool(
+    "label_pages",
+    {
+      title: "Find which PDF page each \\label lands on",
+      description:
+        "Reads the `.aux` file of the most recent `compile` and returns, for every \\label, its number (e.g. section or table number) and the PDF page it lands on, plus the total page count. " +
+        "Useful for page-limit checks ('does the Conclusion end on page 8?') and for checking that figures sit near their first reference. Call `compile` first.",
+      inputSchema: {
+        project_id: projectIdArg,
+        label_prefix: z.string().optional().describe("Only labels starting with this, e.g. 'sec:' or 'tab:'."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    projectTool("read", async (args: { project_id?: string; label_prefix?: string }, ap) => {
+      const last = ap.lastCompile;
+      if (!last) return { content: [{ type: "text", text: "No compile in this session yet. Call `compile` first." }], isError: true };
+      try {
+        const aux = await fetchOutputFile(last, "output.aux");
+        if (aux === undefined) return { content: [{ type: "text", text: "The last compile produced no output.aux." }], isError: true };
+        const log = await fetchOutputLog(last).catch(() => undefined);
+        const pageCount = log ? pageCountFromLog(log) : undefined;
+        let labels = parseAuxLabels(aux);
+        if (args.label_prefix) labels = labels.filter((l) => l.label.startsWith(args.label_prefix as string));
+        const lines = labels.map((l) => `p.${l.page}  ${l.label}  (${l.number}${l.title ? `: ${l.title}` : ""})`);
+        return {
+          content: [{ type: "text", text: `${labels.length} label(s)${pageCount ? `, PDF has ${pageCount} pages` : ""}:\n${lines.join("\n")}` }],
+          structuredContent: { count: labels.length, page_count: pageCount, labels },
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text", text: `Failed to read labels: ${msg}` }], isError: true };
       }
     }),
   );
