@@ -24,13 +24,13 @@ function fakeProject(state: unknown): ActiveProject {
 }
 
 describe("set_track_changes helpers", () => {
-  it("keeps other users' settings when toggling only me", () => {
-    const onFor = buildOnFor({ alice: true, bob: false, __guests__: true }, ["owner", "alice", "bob"], "bob", true, "me");
-    assert.deepEqual(onFor, { alice: true, bob: true });
+  it("changes only my own entry and keeps everyone else's", () => {
+    const onFor = buildOnFor({ alice: true, bob: false, owner: true, __guests__: true }, "bob", true);
+    assert.deepEqual(onFor, { alice: true, bob: true, owner: true });
   });
-  it("sets every member for scope everyone", () => {
-    const onFor = buildOnFor({}, ["owner", "alice", "bob"], "alice", false, "everyone");
-    assert.deepEqual(onFor, { owner: false, alice: false, bob: false });
+  it("turning my tracking off never turns anyone else off", () => {
+    const onFor = buildOnFor({ owner: true, alice: true, bob: true }, "alice", false);
+    assert.deepEqual(onFor, { owner: true, alice: false, bob: true });
   });
   it("expands a legacy boolean state to all users", () => {
     assert.deepEqual(currentStateMap(fakeProject(true)), { owner: true, alice: true, bob: true });

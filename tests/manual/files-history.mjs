@@ -18,7 +18,10 @@ if (!projectId) {
   process.exit(2);
 }
 
-const mcp = spawnMcp({ label: "files-history" });
+// upload_file only reads local files inside MCP roots or OL_UPLOAD_DIRS; this
+// client sends no roots, so allow just a fresh temp dir.
+const dir = mkdtempSync(join(tmpdir(), "olmcp-"));
+const mcp = spawnMcp({ label: "files-history", env: { ...process.env, OL_UPLOAD_DIRS: dir } });
 let failures = 0;
 const check = (cond, what, extra = "") => {
   console.log(`${cond ? "PASS" : "FAIL"}  ${what}${extra ? `  ${extra}` : ""}`);
@@ -38,11 +41,15 @@ try {
   const read = await call("read_file", { path: "mcp-test/sub/note.tex" });
   check(read.structured?.text === "Hello from overleaf-mcp.\nSecond line.\n", "new doc has the content");
 
-  const dir = mkdtempSync(join(tmpdir(), "olmcp-"));
   const local = join(dir, "pixel.png");
   writeFileSync(local, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"));
   const up = await call("upload_file", { path: "mcp-test/pixel.png", local_path: local });
-  check(!up.isError && up.structured?.entity_type === "file", "upload_file", up.text);
+  check(!up.isError && up.structured?.entity_type === "file" && up.text.includes(local), "upload_file names the local file", up.text);
+  writeFileSync(join(dir, ".env"), "SECRET=1\n");
+  const dot = await call("upload_file", { path: "mcp-test/env.txt", local_path: join(dir, ".env") });
+  check(dot.isError && /dotfile/.test(dot.text), "upload_file refuses a dotfile", dot.text);
+  const outside = await call("upload_file", { path: "mcp-test/hosts.txt", local_path: "/etc/hosts" });
+  check(outside.isError && /outside the allowed/.test(outside.text), "upload_file refuses a path outside OL_UPLOAD_DIRS", outside.text);
 
   const ren = await call("rename_entity", { path: "mcp-test/sub", new_name: "renamed" });
   check(!ren.isError && ren.structured?.path === "mcp-test/renamed", "rename_entity (folder)", ren.text);

@@ -20,6 +20,7 @@ import {
   type ActiveProject,
 } from "../session/activeProject.js";
 import { prepareBaseline, submitAndVerify } from "../ot/editPipeline.js";
+import { UPLOAD_DIRS_ENV, checkUploadPath, envUploadDirs, resolveAllowedDirs, rootUploadDirs } from "../util/uploadPaths.js";
 import { projectIdArg, projectTool, type ToolResponse } from "./project.js";
 
 const fail = (text: string): ToolResponse => ({ content: [{ type: "text", text }], isError: true });
@@ -70,7 +71,12 @@ const CreateFolderSchema = z.object({
 const UploadSchema = z.object({
   project_id: projectIdArg,
   path: z.string().min(1).describe("Destination path in the project, e.g. 'figures/teaser.pdf'. An existing file at this path is replaced."),
-  local_path: z.string().optional().describe("Absolute path of a local file to upload."),
+  local_path: z
+    .string()
+    .optional()
+    .describe(
+      `Absolute path of a local file to upload. Must be inside the client's MCP roots or ${UPLOAD_DIRS_ENV}; dotfiles and dot-directories are refused.`,
+    ),
   content_base64: z.string().optional().describe("File content as base64, instead of local_path."),
   create_parents: z.boolean().default(true).describe("Create missing parent folders (default: true)."),
 });
@@ -177,27 +183,38 @@ export function registerProjectFiles(server: McpServer): void {
       title: "Upload a binary file (figure, PDF, ...)",
       description:
         "Uploads a file from the local disk (`local_path`) or from base64 (`content_base64`) to `path` in the project, " +
-        "replacing an existing file of the same name. Use for figures and other binary assets; use create_doc / edit_file for text.",
+        "replacing an existing file of the same name. Use for figures and other binary assets; use create_doc / edit_file for text. " +
+        `local_path is only allowed inside the client's MCP roots or the directories in ${UPLOAD_DIRS_ENV}, and never for dotfiles.`,
       inputSchema: UploadSchema.shape,
     },
     projectTool("write", async (args, ap) => {
       try {
         if (!args.local_path === !args.content_base64) return fail("Pass exactly one of local_path or content_base64.");
-        const bytes = args.local_path ? await readFile(args.local_path) : Buffer.from(args.content_base64 ?? "", "base64");
+        let localFile: string | undefined;
+        if (args.local_path) {
+          const allowed = await resolveAllowedDirs([...(await rootUploadDirs(server)), ...envUploadDirs()]);
+          localFile = await checkUploadPath(args.local_path, allowed);
+        }
+        const bytes = localFile ? await readFile(localFile) : Buffer.from(args.content_base64 ?? "", "base64");
         const { folder, name } = splitPath(args.path);
         const folderId = await ensureFolder(ap, folder, args.create_parents);
         const form = new FormData();
         form.append("name", name);
         form.append("type", "application/octet-stream");
-        form.append("qqfile", new Blob([bytes]), args.local_path ? basename(args.local_path) : name);
+        form.append("qqfile", new Blob([bytes]), localFile ? basename(localFile) : name);
         const res = await olPostForm(`Project/${ap.projectId}/upload?folder_id=${folderId}`, form);
         const body = await asJson<{ success?: boolean; entity_id?: string; entity_type?: string; error?: string }>(res, "POST /upload");
         if (!body.success || !body.entity_id) return fail(`Upload rejected: ${body.error ?? JSON.stringify(body)}`);
         const kind = body.entity_type === "doc" ? "doc" : "file";
         const entity = addEntity(ap, kind, body.entity_id, name, folderId);
         return {
-          content: [{ type: "text", text: `Uploaded ${bytes.length} bytes to '${entity.path}' (${kind}).` }],
-          structuredContent: { path: entity.path, entity_id: entity.id, entity_type: kind, bytes: bytes.length },
+          content: [
+            {
+              type: "text",
+              text: `Uploaded ${localFile ? `local file '${localFile}'` : "base64 content"} (${bytes.length} bytes) to '${entity.path}' (${kind}).`,
+            },
+          ],
+          structuredContent: { path: entity.path, entity_id: entity.id, entity_type: kind, bytes: bytes.length, local_file: localFile },
         };
       } catch (err) {
         return fail(`Failed to upload: ${errText(err)}`);

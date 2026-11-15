@@ -35,7 +35,7 @@ Every project-scoped tool also takes an optional `project_id` — see [Project s
 | `find_and_replace` | Surgical edit: replace one occurrence (or all, with `replace_all: true`) of `old_string` with `new_string` without re-emitting the rest of the doc. Cheaper in tokens than `edit_file` for targeted changes and avoids whitespace drift from re-emitting surrounding text. By default `old_string` must be unique; ambiguous matches return a list of line:col locations so you can extend the match. Same `track` defaults and OT path as `edit_file`, so it lands as a pending suggestion in the Review panel. |
 | `create_doc` | Creates a text doc at `path` (missing folders are created), optionally with initial content. |
 | `create_folder` | Creates a folder and any missing parents. |
-| `upload_file` | Uploads a binary file (figure, PDF, ...) from `local_path` or `content_base64` to `path`, replacing an existing file. |
+| `upload_file` | Uploads a binary file (figure, PDF, ...) from `local_path` or `content_base64` to `path`, replacing an existing file. `local_path` must be inside the client's MCP roots or `OL_UPLOAD_DIRS` (symlinks resolved first; dotfiles and dot-directories refused); with neither configured, only `content_base64` works. |
 | `rename_entity` | Renames a doc, file or folder in place. |
 | `move_entity` | Moves a doc, file or folder to another folder. |
 | `delete_entity` | Deletes a doc, file or folder (folders with their contents). Restorable from Overleaf's history. |
@@ -43,7 +43,7 @@ Every project-scoped tool also takes an optional `project_id` — see [Project s
 | `diff_file` | Shows what changed in one file between two versions, with `[+inserted+]` / `[-deleted-]` markers and context lines. |
 | `list_tracked_changes` | Enumerates every pending tracked-change suggestion across the open project, with author name + email, doc path, op kind (insert/delete), position, op text, change_id. Filter by `author_email`, `author_id_endswith`, `path_contains`, `kind`, `text_contains`, `limit`. |
 | `accept_changes` | Accepts tracked changes, selected by `change_id` (from `list_tracked_changes`) or by filters (`author_email`, `path_contains`, `kind`, `text_contains`, combined with AND) or `all: true`. Multi-doc groups are batched automatically. Irreversible. |
-| `set_track_changes` | Turns the Review panel's 'Track changes' switch on or off (`on`), for yourself (`scope: "me"`, default) or for every member (`scope: "everyone"`), optionally also for guests. Keeps other users' settings intact and updates `track_changes_on_for_me`. |
+| `set_track_changes` | Turns the Review panel's 'Track changes' switch on or off (`on`) for the logged-in user only. Other collaborators' and guests' settings are never changed. Updates `track_changes_on_for_me`. |
 | `reject_changes` | Rejects tracked changes, selected by `change_id` or the same filters as `accept_changes`. Implemented as `applyOtUpdate` with the inverse op + `u:true` (same pathway Overleaf's web client uses). Irreversible. |
 | `compile` | Triggers an Overleaf compile and returns a unified summary: `status`, `built_cleanly` (true iff PDF + zero LaTeX errors), `page_count`, `error_count`, `warning_count`, `first_errors` (sample), `output_files`, timings. Already fetches and parses `output.log` inline — no extra `read_log` call needed for the happy path. Pass `root_doc`, `draft`, `stop_on_first_error` to control. |
 | `label_pages` | After `compile`, reads `output.aux` and lists every `\label` with its number and PDF page, plus the page count. For page-limit and float-placement checks. |
@@ -194,6 +194,7 @@ Any Chromium-family browser works — Chrome, Brave, Edge, Arc, Chromium. If `fi
 | `OL_BROWSER` | auto-detected | Path to a Chromium-family browser if auto-detection fails (Chrome / Brave / Edge / Arc / Chromium). |
 | `OL_INSECURE` | — | Set to `1` to pass `--ignore-certificate-errors` to the captured Chrome instance — for self-hosted CE with a self-signed cert. |
 | `OL_CSRF` | auto-discovered | Force a specific CSRF token. Only needed if your server doesn't ship the `ol-csrfToken` meta tag. |
+| `OL_UPLOAD_DIRS` | — | Directories `upload_file` may read `local_path` from, separated by `:` (`;` on Windows), in addition to the client's MCP roots. Files outside them, and dotfiles, are refused. |
 | `OL_MCP_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. Goes to stderr; stdout is reserved for MCP JSON-RPC. |
 
 ## Troubleshooting
