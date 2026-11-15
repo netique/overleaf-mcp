@@ -1,6 +1,6 @@
 {
   "name": "@netique/overleaf-mcp",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "MCP server for Overleaf with tracked-changes support, via the Socket.IO web API (not the Git bridge).",
   "type": "module",
   "bin": {
