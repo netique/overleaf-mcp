@@ -217,10 +217,12 @@ Releases are published to npm automatically by GitHub Actions
 (`.github/workflows/publish.yml`), using npm trusted publishing, so no npm token
 or `npm login` is involved:
 
-1. Bump the version: `npm version patch --no-git-tag-version` (or `minor` / `major`).
+1. Rename the **Unreleased** section of `CHANGELOG.md` to the new version, then bump
+   the version: `npm version patch --no-git-tag-version` (or `minor` / `major`).
 2. Commit `package.json` and `package-lock.json`, then merge to `main`.
 3. The workflow runs the type check and tests, publishes the new version to npm
-   with provenance, and creates the `vX.Y.Z` tag and GitHub release.
+   with provenance, and creates the `vX.Y.Z` tag and a GitHub release whose notes
+   are that version's `CHANGELOG.md` section.
 
 It skips versions that are already on npm, and can also be started manually
 from the Actions tab. One-time setup: on npmjs.com, the package's

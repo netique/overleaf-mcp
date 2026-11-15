@@ -56,8 +56,17 @@ jobs:
       - if: steps.check.outputs.publish == 'true'
         run: npm publish
 
+      # Release notes come from this version's CHANGELOG.md section; without
+      # one, fall back to GitHub's generated notes.
       - name: Tag and create GitHub release
         if: steps.check.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "v${{ steps.check.outputs.version }}" --target "$GITHUB_SHA" --generate-notes
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          awk -v h="## [$VERSION]" 'index($0, "## ") == 1 { if (p) exit; p = (index($0, h) == 1); next } /^\[[^]]+\]: / { exit } p' CHANGELOG.md > notes.md || true
+          if grep -q '[^[:space:]]' notes.md 2>/dev/null; then
+            gh release create "v$VERSION" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file notes.md
+          else
+            gh release create "v$VERSION" --target "$GITHUB_SHA" --generate-notes
+          fi
