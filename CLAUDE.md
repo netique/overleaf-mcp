@@ -4,7 +4,7 @@ Context for Claude (or any future contributor) working in this repo. Read top to
 
 ## What this is
 
-`overleaf-mcp` is an MCP server for Overleaf. It speaks Overleaf's Socket.IO web API (the same channel the official editor uses), **not** the Git bridge. The headline feature: edits land as **tracked changes** in Overleaf's Review panel — every other Overleaf MCP punts to the Git bridge and silently overwrites, which makes them unusable for collaborative academic work.
+`overleaf-mcp` is an MCP server for Overleaf. It speaks Overleaf's Socket.IO web API (the same channel the official editor uses), **not** the Git bridge. The headline feature: edits land as **tracked changes** in Overleaf's Review panel — tools that go through the Git bridge silently overwrite instead, which makes them unusable for collaborative academic work.
 
 Tools (33): `ping`, `create_project`, `list_projects`, `open_project`, `list_files`, `create_doc`, `create_folder`, `upload_file`, `rename_entity`, `move_entity`, `delete_entity`, `list_history`, `diff_file`, `label_pages`, `read_file`, `edit_file`, `find_and_replace`, `search_project`, `compile`, `read_log`, `list_comments`, `read_comment_thread`, `add_comment`, `reply_comment`, `edit_comment_message`, `delete_comment_message`, `resolve_comment`, `reopen_comment`, `delete_comment`, `list_tracked_changes`, `accept_changes`, `reject_changes`, `set_track_changes`.
 

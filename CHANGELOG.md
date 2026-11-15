@@ -9,6 +9,11 @@ its text becomes the GitHub release notes. For releases before 0.4.0, see the
 
 ## [Unreleased]
 
+### Changed
+
+- README: fixed a typo and toned down the opening claim about other Overleaf MCP
+  servers.
+
 ## [0.4.0] - 2026-11-15
 
 The agent can now do a full co-authoring round on its own. It can turn on track

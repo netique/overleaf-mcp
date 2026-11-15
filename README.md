@@ -2,7 +2,7 @@
 
 An MCP server for [Overleaf](https://www.overleaf.com) that lets a Claude or other agent navigate projects, read/edit `.tex` files, compile, and work with review-panel comments — over Overleaf's **real web/Socket.IO API**, the same channel the official web editor uses.
 
-The one feature no existing Overleaf MCP can deliver: when a project has **track-changes** enabled, the agent's edits appear as **pending suggestions in the Review panel**, the same way a human collaborator's edits do. You and your collaborators can accept or reject each suggestion. You can also ask the agend to accept/reject them (e.g. *"accept all suggestions about typos"*).
+**The headline feature:** when a project has **track-changes** enabled, the agent's edits appear as **pending suggestions in the Review panel**, just like a human collaborator's. You and your collaborators can accept or reject each one, or ask the agent to do it (e.g. *"accept all suggestions about typos"*). Tools that edit through Overleaf's Git bridge can't do this: their changes overwrite the file directly.
 
 ## Why a new MCP
 
